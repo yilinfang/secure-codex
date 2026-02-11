@@ -50,7 +50,7 @@ The following tools must be available on `PATH`:
 ## Usage
 
 ```bash
-./secure-codex [OPTIONS] -- <codex args...>
+secure-codex [OPTIONS] -- <codex args...>
 ```
 
 ### Options
@@ -66,13 +66,13 @@ The following tools must be available on `PATH`:
 
 ```bash
 # Normal usage — decrypt and run codex
-./secure-codex -- chat
+secure-codex -- chat
 
 # Custom encrypted file location
-./secure-codex --auth-enc /path/to/auth.json.age -- chat
+secure-codex --auth-enc /path/to/auth.json.age -- chat
 
 # Clean up the RAM session
-./secure-codex --cleanup
+secure-codex --cleanup
 ```
 
 ## How It Works
