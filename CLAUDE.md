@@ -1,11 +1,11 @@
 ## Project Overview
 
-**secure-codex** is a Linux-only Bash script that provides a secure wrapper for running Codex CLI. It decrypts `age`-encrypted auth credentials into RAM (`/dev/shm` tmpfs), keeping plaintext secrets off disk. Sessions are cached across invocations and cleared on reboot or via `--cleanup`.
+**secure-codex** is a Linux-only Bash script that provides a secure wrapper for running Codex CLI. It decrypts `age`-encrypted auth credentials into RAM (`/dev/shm` tmpfs), keeping plaintext secrets off disk. Sessions are cached across invocations and cleared on reboot or via `SECURE_CODEX_CLEANUP=true`.
 
 ## Running
 
 ```bash
-./secure-codex [--auth-enc PATH] [--real-codex-home PATH] [--cleanup] -- <codex args...>
+SECURE_CODEX_AUTH_ENC=... SECURE_CODEX_REAL_CODEX_HOME=... SECURE_CODEX_CLEANUP=true ./secure-codex <codex args...>
 ```
 
 Linux only — requires `/dev/shm` tmpfs. No build step; the script is the entire project.

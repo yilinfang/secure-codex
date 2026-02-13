@@ -2,7 +2,7 @@
 
 Codex CLI stores OAuth tokens in a plaintext `auth.json` on disk. OpenAI currently provides no way to revoke these tokens ([openai/codex#2557](https://github.com/openai/codex/issues/2557)) — running `codex logout` only deletes the local file while the token remains valid on their servers. If `auth.json` is leaked, the token is permanently compromised.
 
-**secure-codex** mitigates this by keeping `auth.json` encrypted on disk ([`age`](https://github.com/FiloSottile/age)) and decrypting it only into RAM (`/dev/shm` tmpfs) at runtime. Plaintext credentials never touch persistent storage. Sessions are cached across invocations and automatically cleared on reboot or via `--cleanup`.
+**secure-codex** mitigates this by keeping `auth.json` encrypted on disk ([`age`](https://github.com/FiloSottile/age)) and decrypting it only into RAM (`/dev/shm` tmpfs) at runtime. Plaintext credentials never touch persistent storage. Sessions are cached across invocations and automatically cleared on reboot or via `SECURE_CODEX_CLEANUP=true`.
 
 _Currently only Linux is supported and tested._
 
@@ -50,29 +50,32 @@ The following tools must be available on `PATH`:
 ## Usage
 
 ```bash
-secure-codex [OPTIONS] -- <codex args...>
+secure-codex <codex args...>
 ```
 
-### Options
+All CLI arguments are passed through directly to `codex` without wrapper-specific flag parsing. The script has no flags of its own (including `--help`); configuration is done entirely through environment variables.
 
-| Flag                     | Description                       | Default                  |
-| ------------------------ | --------------------------------- | ------------------------ |
-| `--auth-enc PATH`        | Path to encrypted auth file       | `~/.codex/auth.json.age` |
-| `--real-codex-home PATH` | Path to real Codex home directory | `~/.codex`               |
-| `--cleanup`              | Remove RAM session and exit       | —                        |
-| `-h`, `--help`           | Show usage and exit               | —                        |
+### Environment Variables
+
+| Variable                       | Description                       | Default                  |
+| ------------------------------ | --------------------------------- | ------------------------ |
+| `SECURE_CODEX_AUTH_ENC`        | Path to encrypted auth file       | `~/.codex/auth.json.age` |
+| `SECURE_CODEX_REAL_CODEX_HOME` | Path to real Codex home directory | `~/.codex`               |
+| `SECURE_CODEX_CLEANUP`         | Remove RAM session and exit       | `false`                  |
+
+`SECURE_CODEX_CLEANUP` accepts: `true`, `false`, `1`, `0`, `yes`, `no`, `on`, `off`.
 
 ### Examples
 
 ```bash
 # Normal usage — decrypt and run codex
-secure-codex -- chat
+secure-codex chat
 
 # Custom encrypted file location
-secure-codex --auth-enc /path/to/auth.json.age -- chat
+SECURE_CODEX_AUTH_ENC=/path/to/auth.json.age secure-codex chat
 
 # Clean up the RAM session
-secure-codex --cleanup
+SECURE_CODEX_CLEANUP=true secure-codex
 ```
 
 ## How It Works

@@ -5,7 +5,7 @@
 # Keeps your existing ~/.codex directory (config, caches, etc.).
 # Creates a CODEX_HOME in RAM (/dev/shm), symlinks everything except auth.json/auth.json.age,
 # decrypts auth.json into RAM, validates it, and runs codex.
-# The decrypted session is cached across invocations (cleared on reboot or --cleanup).
+# The decrypted session is cached across invocations (cleared on reboot or SECURE_CODEX_CLEANUP=true).
 
 set -euo pipefail
 
@@ -15,47 +15,22 @@ if [[ "$(uname -s)" != "Linux" ]]; then
 	exit 1
 fi
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-	echo "Usage: $0 [--auth-enc PATH] [--real-codex-home PATH] [--cleanup] -- <codex args...>"
-	exit 0
-fi
+AUTH_ENC="${SECURE_CODEX_AUTH_ENC:-${HOME}/.codex/auth.json.age}"
+REAL_CODEX_HOME="${SECURE_CODEX_REAL_CODEX_HOME:-${HOME}/.codex}"
+CLEANUP_RAW="${SECURE_CODEX_CLEANUP:-false}"
 
-AUTH_ENC="${HOME}/.codex/auth.json.age"
-REAL_CODEX_HOME="${HOME}/.codex"
-CLEANUP=false
-
-while [[ "${1:-}" == --* ]]; do
-	case "$1" in
-	--auth-enc)
-		if [[ -z "${2:-}" ]]; then
-			echo "Error: --auth-enc requires a path argument"
-			exit 2
-		fi
-		AUTH_ENC="$2"
-		shift 2
-		;;
-	--real-codex-home)
-		if [[ -z "${2:-}" ]]; then
-			echo "Error: --real-codex-home requires a path argument"
-			exit 2
-		fi
-		REAL_CODEX_HOME="$2"
-		shift 2
-		;;
-	--cleanup)
-		CLEANUP=true
-		shift
-		;;
-	--)
-		shift
-		break
-		;;
-	*)
-		echo "Unknown option: $1"
-		exit 2
-		;;
-	esac
-done
+case "${CLEANUP_RAW,,}" in
+1 | true | yes | on)
+	CLEANUP=true
+	;;
+"" | 0 | false | no | off)
+	CLEANUP=false
+	;;
+*)
+	echo "Error: SECURE_CODEX_CLEANUP must be one of: true,false,1,0,yes,no,on,off"
+	exit 2
+	;;
+esac
 
 # ---- tool checks ----
 for tool in codex age jq ln rm mkdir mktemp chmod uname basename readlink; do
@@ -104,7 +79,7 @@ validate_ram_home() {
 	fi
 }
 
-# Handle --cleanup
+# Handle SECURE_CODEX_CLEANUP=true
 if [[ "$CLEANUP" == true ]]; then
 	[[ "$RAM_HOME" == /dev/shm/* ]] || {
 		echo "Error: refusing to rm outside /dev/shm"
@@ -129,7 +104,7 @@ fi
 
 if [[ -e "$RAM_HOME" ]]; then
 	if ! validate_ram_home; then
-		echo "Tip: run with --cleanup after fixing ownership/perms."
+		echo "Tip: run with SECURE_CODEX_CLEANUP=true after fixing ownership/perms."
 		exit 1
 	fi
 fi
