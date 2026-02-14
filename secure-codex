@@ -18,7 +18,6 @@ fi
 AUTH_ENC="${SECURE_CODEX_AUTH_ENC:-${HOME}/.codex/auth.json.age}"
 REAL_CODEX_HOME="${SECURE_CODEX_REAL_CODEX_HOME:-${HOME}/.codex}"
 CLEANUP_RAW="${SECURE_CODEX_CLEANUP:-false}"
-
 case "${CLEANUP_RAW,,}" in
 1 | true | yes | on)
 	CLEANUP=true
@@ -33,7 +32,7 @@ case "${CLEANUP_RAW,,}" in
 esac
 
 # ---- tool checks ----
-for tool in codex age jq ln rm mkdir mktemp chmod uname basename readlink; do
+for tool in codex age jq ln rm mkdir mktemp chmod uname basename readlink stat date; do
 	if ! command -v "$tool" >/dev/null 2>&1; then
 		echo "Error: required tool not found: $tool"
 		exit 1
@@ -102,10 +101,33 @@ if [[ "$CLEANUP" == true ]]; then
 	exit 0
 fi
 
+# ---- TTL validation (only needed for non-cleanup runs) ----
+TTL="${SECURE_CODEX_TTL:-86400}" # seconds before auto-cleanup (default: 1 day)
+
+if ! [[ "$TTL" =~ ^[0-9]+$ ]]; then
+	echo "Error: SECURE_CODEX_TTL must be a non-negative integer (got: '$TTL')"
+	exit 2
+fi
+
 if [[ -e "$RAM_HOME" ]]; then
 	if ! validate_ram_home; then
 		echo "Tip: run with SECURE_CODEX_CLEANUP=true after fixing ownership/perms."
 		exit 1
+	fi
+fi
+
+# Auto-cleanup stale sessions exceeding TTL
+if [[ -f "${RAM_HOME}/auth.json" ]]; then
+	auth_mtime="$(stat -c %Y "${RAM_HOME}/auth.json" 2>/dev/null || echo 0)"
+	now="$(date +%s)"
+	age_secs=$(( now - auth_mtime ))
+	if (( age_secs >= 10#$TTL )); then
+		echo "Session expired (${age_secs}s old, TTL=${TTL}s). Re-decrypting."
+		[[ "$RAM_HOME" == /dev/shm/* ]] || {
+			echo "Error: refusing to rm outside /dev/shm"
+			exit 1
+		}
+		rm -rf -- "$RAM_HOME"
 	fi
 fi
 
