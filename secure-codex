@@ -5,7 +5,7 @@
 # Keeps your existing ~/.codex directory (config, caches, etc.).
 # Creates a CODEX_HOME in RAM (/dev/shm), symlinks everything except auth.json/auth.json.age,
 # decrypts auth.json into RAM, validates it, and runs codex.
-# The decrypted session is cached across invocations (cleared on reboot or SECURE_CODEX_CLEANUP=true).
+# The decrypted session can be kept across invocations with SECURE_CODEX_KEEP=true.
 
 set -euo pipefail
 
@@ -31,8 +31,22 @@ case "${CLEANUP_RAW,,}" in
 	;;
 esac
 
+KEEP_RAW="${SECURE_CODEX_KEEP:-false}"
+case "${KEEP_RAW,,}" in
+1 | true | yes | on)
+	KEEP=true
+	;;
+"" | 0 | false | no | off)
+	KEEP=false
+	;;
+*)
+	echo "Error: SECURE_CODEX_KEEP must be one of: true,false,1,0,yes,no,on,off"
+	exit 2
+	;;
+esac
+
 # ---- tool checks ----
-for tool in codex age jq ln rm mkdir mktemp chmod uname basename readlink stat date; do
+for tool in codex age jq ln rm mkdir mktemp chmod uname basename readlink; do
 	if ! command -v "$tool" >/dev/null 2>&1; then
 		echo "Error: required tool not found: $tool"
 		exit 1
@@ -78,18 +92,19 @@ validate_ram_home() {
 	fi
 }
 
-# Handle SECURE_CODEX_CLEANUP=true
-if [[ "$CLEANUP" == true ]]; then
+cleanup_ram_home() {
 	[[ "$RAM_HOME" == /dev/shm/* ]] || {
 		echo "Error: refusing to rm outside /dev/shm"
-		exit 1
+		return 1
 	}
+	rm -rf -- "$RAM_HOME" || return 1
+	[[ ! -e "$RAM_HOME" ]]
+}
+
+# Handle SECURE_CODEX_CLEANUP=true
+if [[ "$CLEANUP" == true ]]; then
 	if [[ -e "$RAM_HOME" ]]; then
-		if rm -rf -- "$RAM_HOME"; then
-			if [[ -e "$RAM_HOME" ]]; then
-				echo "Error: cleanup incomplete for $RAM_HOME"
-				exit 1
-			fi
+		if cleanup_ram_home; then
 			echo "Cleaned up $RAM_HOME"
 		else
 			echo "Error: failed to clean up $RAM_HOME"
@@ -101,14 +116,6 @@ if [[ "$CLEANUP" == true ]]; then
 	exit 0
 fi
 
-# ---- TTL validation (only needed for non-cleanup runs) ----
-TTL="${SECURE_CODEX_TTL:-86400}" # seconds before auto-cleanup (default: 1 day)
-
-if ! [[ "$TTL" =~ ^[0-9]+$ ]]; then
-	echo "Error: SECURE_CODEX_TTL must be a non-negative integer (got: '$TTL')"
-	exit 2
-fi
-
 if [[ -e "$RAM_HOME" ]]; then
 	if ! validate_ram_home; then
 		echo "Tip: run with SECURE_CODEX_CLEANUP=true after fixing ownership/perms."
@@ -116,23 +123,8 @@ if [[ -e "$RAM_HOME" ]]; then
 	fi
 fi
 
-# Auto-cleanup stale sessions exceeding TTL
-if [[ -f "${RAM_HOME}/auth.json" ]]; then
-	auth_mtime="$(stat -c %Y "${RAM_HOME}/auth.json" 2>/dev/null || echo 0)"
-	now="$(date +%s)"
-	age_secs=$(( now - auth_mtime ))
-	if (( age_secs >= 10#$TTL )); then
-		echo "Session expired (${age_secs}s old, TTL=${TTL}s). Re-decrypting."
-		[[ "$RAM_HOME" == /dev/shm/* ]] || {
-			echo "Error: refusing to rm outside /dev/shm"
-			exit 1
-		}
-		rm -rf -- "$RAM_HOME"
-	fi
-fi
-
-# Reuse existing session if auth.json is present and valid
-if [[ -f "${RAM_HOME}/auth.json" ]] && jq -e . "${RAM_HOME}/auth.json" >/dev/null 2>&1; then
+# Reuse existing session only when explicitly keeping state
+if [[ "$KEEP" == true ]] && [[ -f "${RAM_HOME}/auth.json" ]] && jq -e . "${RAM_HOME}/auth.json" >/dev/null 2>&1; then
 	# Refresh symlinks in case REAL_CODEX_HOME contents changed
 	shopt -s dotglob nullglob
 	for path in "${REAL_CODEX_HOME}"/*; do
@@ -160,7 +152,7 @@ else
 		echo "Error: refusing to rm outside /dev/shm"
 		exit 1
 	}
-	rm -rf "$RAM_HOME" 2>/dev/null || true
+	rm -rf -- "$RAM_HOME" 2>/dev/null || true
 	mkdir -p "$RAM_HOME"
 	chmod 700 "$RAM_HOME"
 	validate_ram_home || exit 1
@@ -210,4 +202,18 @@ fi
 
 # Run codex using RAM CODEX_HOME
 export CODEX_HOME="$RAM_HOME"
+set +e
 codex "$@"
+codex_status=$?
+set -e
+
+if [[ "$KEEP" != true ]]; then
+	if ! cleanup_ram_home; then
+		echo "Error: failed to clean up $RAM_HOME after codex exit"
+		if [[ "$codex_status" -eq 0 ]]; then
+			exit 1
+		fi
+	fi
+fi
+
+exit "$codex_status"

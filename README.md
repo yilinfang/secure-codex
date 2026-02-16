@@ -2,7 +2,7 @@
 
 Codex CLI stores OAuth tokens in a plaintext `auth.json` on disk. OpenAI currently provides no way to revoke these tokens ([openai/codex#2557](https://github.com/openai/codex/issues/2557)) — running `codex logout` only deletes the local file while the token remains valid on their servers. If `auth.json` is leaked, the token is permanently compromised.
 
-**secure-codex** mitigates this by keeping `auth.json` encrypted on disk ([`age`](https://github.com/FiloSottile/age)) and decrypting it only into RAM (`/dev/shm` tmpfs) at runtime. Plaintext credentials never touch persistent storage. Sessions are cached across invocations and automatically cleared on reboot, after a configurable TTL (default: 1 day), or via `SECURE_CODEX_CLEANUP=true`.
+**secure-codex** mitigates this by keeping `auth.json` encrypted on disk ([`age`](https://github.com/FiloSottile/age)) and decrypting it only into RAM (`/dev/shm` tmpfs) at runtime. Plaintext credentials never touch persistent storage. By default, RAM session data is removed when `codex` exits. Set `SECURE_CODEX_KEEP=true` to keep the decrypted session in RAM across invocations. Sessions are also cleared on reboot or via `SECURE_CODEX_CLEANUP=true`.
 
 _Currently only Linux is supported and tested._
 
@@ -36,7 +36,7 @@ The following tools must be available on `PATH`:
 - [`codex`](https://github.com/openai/codex) — the CLI being wrapped
 - [`age`](https://github.com/FiloSottile/age) — for decrypting `auth.json.age`
 - [`jq`](https://jqlang.org/) — for JSON validation
-- Standard coreutils: `ln`, `rm`, `mkdir`, `mktemp`, `chmod`, `uname`, `basename`, `readlink`, `stat`, `date`
+- Standard coreutils: `ln`, `rm`, `mkdir`, `mktemp`, `chmod`, `uname`, `basename`, `readlink`
 
 ## Setup
 
@@ -61,12 +61,10 @@ All CLI arguments are passed through directly to `codex` without wrapper-specifi
 | ------------------------------ | --------------------------------- | ------------------------ |
 | `SECURE_CODEX_AUTH_ENC`        | Path to encrypted auth file       | `~/.codex/auth.json.age` |
 | `SECURE_CODEX_REAL_CODEX_HOME` | Path to real Codex home directory | `~/.codex`               |
+| `SECURE_CODEX_KEEP`            | Keep RAM session after exit       | `false`                  |
 | `SECURE_CODEX_CLEANUP`         | Remove RAM session and exit       | `false`                  |
-| `SECURE_CODEX_TTL`             | Session TTL in seconds            | `86400` (1 day)          |
 
-`SECURE_CODEX_CLEANUP` accepts: `true`, `false`, `1`, `0`, `yes`, `no`, `on`, `off`.
-
-When a cached session's `auth.json` is older than `SECURE_CODEX_TTL` seconds, it is automatically wiped and re-decrypted on the next invocation.
+`SECURE_CODEX_KEEP` and `SECURE_CODEX_CLEANUP` both accept: `true`, `false`, `1`, `0`, `yes`, `no`, `on`, `off`.
 
 ### Examples
 
@@ -79,13 +77,16 @@ SECURE_CODEX_AUTH_ENC=/path/to/auth.json.age secure-codex chat
 
 # Clean up the RAM session
 SECURE_CODEX_CLEANUP=true secure-codex
+
+# Keep decrypted session in RAM across invocations
+SECURE_CODEX_KEEP=true secure-codex chat
 ```
 
 ## How It Works
 
 1. **Validates** the environment: Linux OS, required tools, `/dev/shm` writability
 2. **Creates a RAM home** at `/dev/shm/codex-home-<uid>` with strict ownership and permission checks
-3. **Manages sessions** — reuses an existing decrypted session if valid, otherwise symlinks non-auth files from `~/.codex` and decrypts `auth.json.age` into RAM via atomic temp-file-then-move
+3. **Manages sessions** — reuses an existing decrypted session only when `SECURE_CODEX_KEEP=true`; otherwise always sets up a fresh RAM home by symlinking non-auth files from `~/.codex` and decrypting `auth.json.age` into RAM via atomic temp-file-then-move
 4. **Runs Codex** with `CODEX_HOME` pointing to the RAM directory
 
 ## Security
@@ -95,4 +96,4 @@ SECURE_CODEX_CLEANUP=true secure-codex
 - Atomic writes via temp file + `mv` prevent partial-state exposure
 - Ownership validation (`-O`) and symlink attack prevention on the RAM home directory
 - `rm` operations are confined to `/dev/shm` paths
-- Sessions are automatically cleared on reboot or after TTL expiry (default: 1 day)
+- Sessions are automatically cleared on reboot, on normal exit (default), or on demand with `SECURE_CODEX_CLEANUP=true`
